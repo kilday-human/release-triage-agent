@@ -13,6 +13,9 @@ venv/
 # Env files
 .env
 
+# Local cache (regenerable API lookups)
+.cache/
+
 # OS / editor
 .DS_Store
 .vscode/

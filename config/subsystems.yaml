@@ -1,0 +1,28 @@
+# Owned knowledge: which code paths belong to a subsystem, and which
+# test paths should show up in a PR diff that touches it. Hand-written
+# and hand-maintained, not inferred. See docs/PRD.md "Scope (v1)".
+
+subsystems:
+  - name: EKF
+    code_paths:
+      - libraries/AP_NavEKF2/
+      - libraries/AP_NavEKF3/
+    test_paths:
+      - Tools/autotest/arducopter.py
+      - Tools/autotest/arduplane.py
+      - Tools/autotest/ardusub.py
+      - Tools/autotest/vehicle_test_suite.py
+
+  - name: GPS
+    code_paths:
+      - libraries/AP_GPS/
+    test_paths:
+      - Tools/autotest/arducopter.py
+      - Tools/autotest/arduplane.py
+      - Tools/autotest/vehicle_test_suite.py
+
+  - name: Loiter (flight mode)
+    code_paths:
+      - ArduCopter/mode_loiter.cpp
+    test_paths:
+      - Tools/autotest/arducopter.py
