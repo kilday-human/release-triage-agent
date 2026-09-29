@@ -143,7 +143,44 @@ the lookup, not a guess based on a number.
 
 ---
 
-## The pattern across all four
+## 5. Sweeping multiple ranges silently multiplied the same evidence
+
+**Assumed:** running the tool across eight tag pairs - two more Copter
+point releases plus one Copter release from an earlier version series,
+two ArduPlane, two Rover - would produce eight independent samples,
+each reflecting that vehicle's own release activity for that window.
+
+**What the data showed:** ArduPilot is one monorepo. Copter, Plane, and
+Rover point releases at the same version number are frequently cut
+from nearly the same point in shared history. Copter-4.6.1 ->
+Copter-4.6.2, Plane-4.6.1 -> Plane-4.6.2, and Rover-4.6.1 ->
+Rover-4.6.2 resolved to the identical 121 commits, the identical 47
+PRs, and byte-identical bucket assignments (same PR numbers in bucket
+1 and bucket 2, in all three). The next version step (4.6.2 -> 4.6.3)
+did the same across all three vehicles again. Eight report rows were
+really four distinct commit windows, three of them measured once and
+one of them measured three times over.
+
+**What the wrong version would have shipped:** any aggregate computed
+across the eight raw rows - a bucket-2-to-bucket-3 ratio, a rate of
+how often bucket 1 fires - would count the same underlying PRs and the
+same underlying gap three times each for two of the four windows,
+inflating whatever the true rate is without any single row's own
+number being wrong. The raw sweep gave a 5:1 bucket2:bucket3 ratio; the
+number that actually means something, deduplicated to four windows, is
+3:1. Both were computed correctly from the data pulled. Only one of
+them describes four independent measurements.
+
+**What changed:** no code change - this was a measurement run, not a
+logic change, and the classification and gate code are unaffected. The
+report (`reports/SWEEP.md`) groups rows by which commit window they
+share before stating any ratio or cross-vehicle comparison, and states
+the deduplicated total plainly rather than letting the raw per-row
+count stand as if it were the real one.
+
+---
+
+## The pattern across all five
 
 Every one of these produced output that looked like a real, specific
 answer. None of them crashed, timed out, or came back empty in a way
