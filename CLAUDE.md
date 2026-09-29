@@ -8,7 +8,10 @@ memory).
 ## Commands
 - Activate venv: `source venv/bin/activate`
 - Install deps: `pip install -r requirements.txt`
-- Run tests: `pytest`
+
+There are no automated tests. Verification is done by hand-checking
+agent output against GitHub, PR by PR - see docs/LEARNINGS.md for what
+that caught.
 
 ## Rules
 
