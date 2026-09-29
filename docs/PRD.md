@@ -1,5 +1,10 @@
 # PRD: Release-Readiness Triage Agent
 
+> **Note, 2026-09-29:** this document reflects the original scope as
+> written. It has not been kept current with every session. For what
+> the tool actually found and what state the project is in now, see
+> `reports/SWEEP.md` and `docs/STATE.md`.
+
 ## Problem
 
 Release go/no-go decisions get made on whatever evidence happens to be
@@ -66,19 +71,21 @@ already pulled, no LLM judgment call):
    PR diff, and the PR body has no testing checkbox ticked
    (ArduPilot's template: `Automated test(s) verify changes`, `Tested
    manually`, `Tested on hardware`, etc.) and no testing prose.
-2. **No test, claim stated** — no test file in the diff, but the PR
-   body ticks a testing checkbox and/or contains prose describing
-   verification (e.g. "walked release tags to verify", bench-log
-   replay, SITL run description). The agent reports the claim text
-   verbatim. **It does not assess whether the claim is credible or
-   sufficient — that judgment stays with the human reader.**
+2. **Claimed, not evidenced** (originally labeled "no test, claim
+   stated", relabeled so a claim is never presented as a test): no
+   test file in the diff, but the PR body ticks a testing checkbox
+   and/or contains prose describing verification (e.g. "walked release
+   tags to verify", bench-log replay, SITL run description). The agent
+   reports the claim text verbatim. **It does not assess whether the
+   claim is credible or sufficient — that judgment stays with the
+   human reader.**
 3. **Test present** — a file under the mapped test path is in the same
    diff as the subsystem change.
 
 Real examples from the 5-PR sample: #34194 (parameter-conversion
 removal) has no test file and no checkbox ticked, but its body argues
-"no autotest depends on any of the removed code" — bucket 2, claim
-stated, not verified by the tool. #34188 (comments-only PR) has
+"no autotest depends on any of the removed code" — bucket 2, claimed
+not evidenced, not verified by the tool. #34188 (comments-only PR) has
 `Automated test(s) verify changes` ticked with no test file in diff —
 also bucket 2. #34283, #34057, #34027 all have both a test file and a
 checkbox/prose claim — bucket 3.
@@ -90,13 +97,32 @@ CLI run produces two things:
 1. Terminal output, human-readable
 2. A saved markdown report (the artifact)
 
-**Report structure is gaps-first, three buckets, named, no score.**
-Bucket 1 (no test, no claim) leads. Bucket 2 (no test, claim stated)
-follows, with the claim quoted, not scored. Bucket 3 (test present)
-goes last, as supporting detail. This ordering is the thesis of the
-tool, not a style choice: most triage tools open with a summary of
-everything that ran, which quietly buries the risk this agent exists
-to surface.
+**Report structure is gaps-first, named, no score.** Order: bucket 1
+(no test, no claim), bucket 2 (claimed, not evidenced, the claim
+quoted, not scored), unresolved commits (no identifiable reviewed PR),
+bucket 3 (test present, last, as supporting detail). This ordering is
+the thesis of the tool, not a style choice: most triage tools open
+with a summary of everything that ran, which quietly buries the risk
+this agent exists to surface.
+
+**The report also carries a GO/NO-GO verdict.** It is deterministic
+code, never derived from LLM output. There is no LLM in this tool at
+all currently, but the rule holds regardless: a verdict must come from
+code, and an LLM, if one is ever added, may only write summary prose
+after the verdict is already fixed. The verdict keys on exactly two
+inputs, chosen because each can structurally produce a failing
+result:
+
+- bucket 1 count (a subsystem change with no test and no claim)
+- unresolved commit count (no identifiable reviewed PR: the review
+  trail itself is broken)
+
+Bucket 2 (claimed, not evidenced) does not gate the verdict. A PR body
+claim can only ever soften a no-test result into something less bad;
+it can never independently fail one, because the tool never verifies
+whether the claim is true. Counting it toward the verdict would let an
+unverified claim manufacture a passing result. The report states this
+explicitly next to the verdict, not just here.
 
 ## Done for demo
 
