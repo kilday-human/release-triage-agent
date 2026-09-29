@@ -115,13 +115,16 @@ breakdown and the counting caveat).
 **Bucket 1 fired in 3 of those 4 distinct commit windows.** One of the
 flagged PRs: **#27799**, `AP_GPS: Backport correct satellite count for
 SBF DNU NrSv value`, merged into the Copter-4.5 branch with no test
-file in its diff and no testing claim in its body. It was reverted
-about two weeks later, folded into the next release-bookkeeping PR,
-after a user on the ArduPilot forum reported that on affected
-Septentrio GPS units the change caused a bad or missing HDOP reading
-to come through as `0.0`, which reads as ideal GPS quality rather than
-bad, so the failsafe check that should trigger on poor HDOP never saw
-a bad value. A fail-open in a failsafe check.
+file in its diff and no testing claim in its body. About 12 days after
+merge, commit `e569f387` ("revert backport to copter 4.5 the correct
+satellite count for NrSv do-not-use value") explicitly reverted it,
+naming #27799's own merge commit by SHA in its message, bundled into
+the next release-bookkeeping PR, #28328. The revert followed a user
+report on the ArduPilot forum that on affected Septentrio GPS units
+the change caused a bad or missing HDOP reading to come through as
+`0.0`, which reads as ideal GPS quality rather than bad, so the
+failsafe check that should trigger on poor HDOP never saw a bad
+value. A fail-open in a failsafe check.
 
 ## What it does not do
 
@@ -136,6 +139,14 @@ a bad value. A fail-open in a failsafe check.
   show, then or now, is that the PR shipped with no test file and no
   claim in its body: an absence of re-runnable evidence, not a defect
   finding. Naming that absence is the entire scope of the tool.
+
+The PRs flagged here are not unreviewed. Several carry a NeedsTesting
+label cleared by a reviewer, an author comment stating the fix was
+tested, or a vendor confirmation. That evidence is real, and it is
+also not re-runnable, not attached to the diff, and not visible to
+this tool. For hardware-dependent driver code, where the test needs a
+specific GNSS unit configured a specific way, that may be the only
+evidence available.
 
 ## Further reading
 
