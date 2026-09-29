@@ -20,6 +20,7 @@ match exists. An ambiguous or absent match is reported as
 "unresolved", not guessed - see resolve_by_message().
 """
 
+import argparse
 import json
 import os
 import re
@@ -306,8 +307,8 @@ def bucket_for_subsystem(files, claim, subsystem):
     return 1
 
 
-def classify_range(client, subsystems, cache):
-    commits = commits_in_range(client, REPO, BASE_TAG, HEAD_TAG)
+def classify_range(client, subsystems, cache, base_tag, head_tag):
+    commits = commits_in_range(client, REPO, base_tag, head_tag)
     prs, commits_by_pr, fallback_prs, unresolved = resolve_prs(client, REPO, commits, cache)
 
     results = []
@@ -403,8 +404,8 @@ def claim_text(r):
     return claim["text"] if claim else "MISSING"
 
 
-def print_report(data):
-    print(f"Release range: {BASE_TAG} -> {HEAD_TAG} "
+def print_report(data, base_tag, head_tag):
+    print(f"Release range: {base_tag} -> {head_tag} "
           f"({data['commit_count']} commits, {data['pr_count']} resolved PRs, "
           f"{len(data['unresolved'])} unresolved commits)\n")
 
@@ -439,8 +440,8 @@ def print_report(data):
     print()
 
 
-def render_markdown(data):
-    lines = [f"# Release triage: {BASE_TAG} -> {HEAD_TAG}", ""]
+def render_markdown(data, base_tag, head_tag):
+    lines = [f"# Release triage: {base_tag} -> {head_tag}", ""]
     lines.append(
         f"{data['commit_count']} commits, {data['pr_count']} resolved PRs, "
         f"{len(data['unresolved'])} unresolved commits."
@@ -487,8 +488,17 @@ def render_markdown(data):
     return "\n".join(lines)
 
 
-def report_filename():
-    return f"{BASE_TAG}_to_{HEAD_TAG}.md"
+def report_filename(base_tag, head_tag):
+    return f"{base_tag}_to_{head_tag}.md"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Release-readiness triage agent")
+    parser.add_argument("base_tag", nargs="?", default=BASE_TAG,
+                         help=f"start tag, exclusive (default: {BASE_TAG})")
+    parser.add_argument("head_tag", nargs="?", default=HEAD_TAG,
+                         help=f"end tag, inclusive (default: {HEAD_TAG})")
+    return parser.parse_args()
 
 
 def main():
@@ -498,18 +508,21 @@ def main():
         print("GITHUB_TOKEN not set in .env", file=sys.stderr)
         sys.exit(1)
 
+    args = parse_args()
     client = GitHubClient(token)
     subsystems = load_subsystems()
     cache = load_cache()
-    commit_count, pr_count, results, unresolved = classify_range(client, subsystems, cache)
+    commit_count, pr_count, results, unresolved = classify_range(
+        client, subsystems, cache, args.base_tag, args.head_tag
+    )
     data = build_report_data(commit_count, pr_count, results, unresolved)
 
-    print_report(data)
+    print_report(data, args.base_tag, args.head_tag)
 
     reports_dir = Path("reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
-    report_path = reports_dir / report_filename()
-    report_path.write_text(render_markdown(data))
+    report_path = reports_dir / report_filename(args.base_tag, args.head_tag)
+    report_path.write_text(render_markdown(data, args.base_tag, args.head_tag))
     print(f"Saved: {report_path}")
 
 
