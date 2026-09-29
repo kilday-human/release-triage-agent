@@ -264,31 +264,44 @@ def strip_boilerplate(body):
     return text
 
 
-def testing_checkbox_ticked(body):
-    for mark, label in CHECKBOX_LINE.findall(body):
-        if mark.lower() != "x":
-            continue
-        if any(kw in label.lower() for kw in TESTING_CHECKBOX_LABELS):
-            return True
-    return False
+def ticked_checkbox_labels(body):
+    return [
+        label.strip()
+        for mark, label in CHECKBOX_LINE.findall(body)
+        if mark.lower() == "x" and any(kw in label.lower() for kw in TESTING_CHECKBOX_LABELS)
+    ]
 
 
-def claim_in_prose(body):
-    remainder = strip_boilerplate(body).lower()
-    return any(kw in remainder for kw in CLAIM_KEYWORDS)
+def prose_claim_lines(body):
+    text = strip_boilerplate(body)
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and any(kw in line.lower() for kw in CLAIM_KEYWORDS)
+    ]
 
 
-def has_claim(body):
-    return testing_checkbox_ticked(body) or claim_in_prose(body)
+def get_claim(body):
+    """Returns {"source", "text"} with the verbatim claim (checkbox label(s)
+    or first matching prose line), or None if no claim is present. Never
+    scores or verifies the claim - see PRD 'Processing', bucket 2: the tool
+    reports the claim, the human judges it."""
+    labels = ticked_checkbox_labels(body)
+    if labels:
+        return {"source": "checkbox", "text": "; ".join(labels)}
+    prose = prose_claim_lines(body)
+    if prose:
+        return {"source": "prose", "text": prose[0]}
+    return None
 
 
-def bucket_for_subsystem(files, body, subsystem):
+def bucket_for_subsystem(files, claim, subsystem):
     """Returns None if this PR doesn't touch the subsystem, else 1/2/3."""
     if not touches_any(files, subsystem["code_paths"]):
         return None
     if touches_any(files, subsystem["test_paths"]):
         return 3
-    if has_claim(body):
+    if claim is not None:
         return 2
     return 1
 
@@ -315,14 +328,16 @@ def classify_range(client, subsystems, cache):
             files = pr_files(client, REPO, number)
             body = pr.get("body") or ""
 
+        claim = get_claim(body)
         for subsystem in subsystems:
-            bucket = bucket_for_subsystem(files, body, subsystem)
+            bucket = bucket_for_subsystem(files, claim, subsystem)
             if bucket is not None:
                 results.append({
                     "pr": number,
                     "title": pr["title"],
                     "subsystem": subsystem["name"],
                     "bucket": bucket,
+                    "claim": claim if bucket == 2 else None,
                 })
 
     for u in unresolved:
@@ -336,32 +351,144 @@ def classify_range(client, subsystems, cache):
 
 BUCKET_LABELS = {
     1: "No test, no claim",
-    2: "No test, claim stated",
+    2: "Claimed, not evidenced",
     3: "Test present",
 }
 
+# Gate rule: an input only gates the verdict if it can structurally
+# produce a failing result. Test-file-in-diff (bucket 1 vs 3) and
+# commit->PR resolution (unresolved) both can. A PR body claim (bucket 2)
+# can only ever soften a no-test result, never independently fail one -
+# the tool never verifies it (see PRD "Processing") - so it's flagged
+# here as non-evidence instead of silently counted toward the verdict.
+NON_GATING_NOTE = (
+    'PR body claims (bucket 2, "claimed, not evidenced") are quoted for '
+    "context only. The tool does not verify them, so this input can "
+    "never independently produce a failing result and does not affect "
+    "the verdict above."
+)
 
-def print_report(commit_count, pr_count, results, unresolved):
+
+def gate_verdict(bucket1_count, unresolved_count):
+    """Deterministic, code-only verdict - never derived from LLM output.
+    Gates only on inputs that can say no: bucket 1 (subsystem change,
+    no test, no claim) and unresolved commits (no identifiable reviewed
+    PR). See NON_GATING_NOTE for why bucket 2 is excluded."""
+    reasons = []
+    if bucket1_count:
+        reasons.append(f"{bucket1_count} subsystem change(s) with no test and no claim")
+    if unresolved_count:
+        reasons.append(f"{unresolved_count} commit(s) with no identifiable reviewed PR")
+    verdict = "NO-GO" if reasons else "GO"
+    return verdict, reasons
+
+
+def build_report_data(commit_count, pr_count, results, unresolved):
+    by_bucket = {1: [], 2: [], 3: []}
+    for r in results:
+        by_bucket[r["bucket"]].append(r)
+    verdict, reasons = gate_verdict(len(by_bucket[1]), len(unresolved))
+    return {
+        "commit_count": commit_count,
+        "pr_count": pr_count,
+        "unresolved": unresolved,
+        "by_bucket": by_bucket,
+        "verdict": verdict,
+        "reasons": reasons,
+    }
+
+
+def claim_text(r):
+    claim = r.get("claim")
+    return claim["text"] if claim else "MISSING"
+
+
+def print_report(data):
     print(f"Release range: {BASE_TAG} -> {HEAD_TAG} "
-          f"({commit_count} commits, {pr_count} resolved PRs, "
-          f"{len(unresolved)} unresolved commits)\n")
+          f"({data['commit_count']} commits, {data['pr_count']} resolved PRs, "
+          f"{len(data['unresolved'])} unresolved commits)\n")
 
+    print(f"Verdict: {data['verdict']}")
+    for reason in data["reasons"]:
+        print(f"  - {reason}")
+    if not data["reasons"]:
+        print("  - no bucket 1 gaps, no unresolved commits")
+    print()
+    print(f"Note: {NON_GATING_NOTE}\n")
+
+    for bucket in (1, 2):
+        rows = data["by_bucket"][bucket]
+        print(f"== Bucket {bucket}: {BUCKET_LABELS[bucket]} ({len(rows)}) ==")
+        for r in rows:
+            print(f"  PR #{r['pr']} [{r['subsystem']}] {r['title']}")
+            if bucket == 2:
+                print(f'      claim: "{claim_text(r)}"')
+        print()
+
+    unresolved = data["unresolved"]
     print(f"== Unresolved: commit landed, no identifiable reviewed PR ({len(unresolved)}) ==")
     for u in unresolved:
         touched = f" [touches: {', '.join(u['subsystems_touched'])}]" if u["subsystems_touched"] else ""
         print(f"  {u['sha'][:9]} {u['message']}{touched}  ({u['reason']})")
     print()
 
-    by_bucket = {1: [], 2: [], 3: []}
-    for r in results:
-        by_bucket[r["bucket"]].append(r)
+    rows = data["by_bucket"][3]
+    print(f"== Bucket 3: {BUCKET_LABELS[3]} ({len(rows)}) ==")
+    for r in rows:
+        print(f"  PR #{r['pr']} [{r['subsystem']}] {r['title']}")
+    print()
 
-    for bucket in (1, 2, 3):
-        rows = by_bucket[bucket]
-        print(f"== Bucket {bucket}: {BUCKET_LABELS[bucket]} ({len(rows)}) ==")
+
+def render_markdown(data):
+    lines = [f"# Release triage: {BASE_TAG} -> {HEAD_TAG}", ""]
+    lines.append(
+        f"{data['commit_count']} commits, {data['pr_count']} resolved PRs, "
+        f"{len(data['unresolved'])} unresolved commits."
+    )
+    lines.append("")
+    lines.append(f"## Verdict: {data['verdict']}")
+    lines.append("")
+    if data["reasons"]:
+        for reason in data["reasons"]:
+            lines.append(f"- {reason}")
+    else:
+        lines.append("- no bucket 1 gaps, no unresolved commits")
+    lines.append("")
+    lines.append(f"> {NON_GATING_NOTE}")
+    lines.append("")
+
+    def bucket_section(bucket):
+        rows = data["by_bucket"][bucket]
+        out = [f"## Bucket {bucket}: {BUCKET_LABELS[bucket]} ({len(rows)})", ""]
+        if not rows:
+            out.append("_none_")
         for r in rows:
-            print(f"  PR #{r['pr']} [{r['subsystem']}] {r['title']}")
-        print()
+            out.append(f"- PR #{r['pr']} [{r['subsystem']}] {r['title']}")
+            if bucket == 2:
+                out.append(f'  - claim: "{claim_text(r)}"')
+        out.append("")
+        return out
+
+    lines += bucket_section(1)
+    lines += bucket_section(2)
+
+    unresolved = data["unresolved"]
+    lines.append(f"## Unresolved: commit landed, no identifiable reviewed PR ({len(unresolved)})")
+    lines.append("")
+    if not unresolved:
+        lines.append("_none_")
+    for u in unresolved:
+        touched = f" [touches: {', '.join(u['subsystems_touched'])}]" if u["subsystems_touched"] else ""
+        lines.append(f"- `{u['sha'][:9]}` {u['message']}{touched} ({u['reason']})")
+    lines.append("")
+
+    lines += bucket_section(3)
+
+    return "\n".join(lines)
+
+
+def report_filename():
+    return f"{BASE_TAG}_to_{HEAD_TAG}.md"
 
 
 def main():
@@ -375,7 +502,15 @@ def main():
     subsystems = load_subsystems()
     cache = load_cache()
     commit_count, pr_count, results, unresolved = classify_range(client, subsystems, cache)
-    print_report(commit_count, pr_count, results, unresolved)
+    data = build_report_data(commit_count, pr_count, results, unresolved)
+
+    print_report(data)
+
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_path = reports_dir / report_filename()
+    report_path.write_text(render_markdown(data))
+    print(f"Saved: {report_path}")
 
 
 if __name__ == "__main__":
